@@ -1,10 +1,10 @@
 /* App-shell cache: same-origin static files only. GitHub API requests are
    never cached — data always comes from the network (or the app's own queue). */
-const CACHE = 'monolith-shell-v3';
+const CACHE = 'monolith-shell-v4';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
   './js/app.js', './js/api.js', './js/auth.js', './js/cal.js', './js/crypto.js',
-  './js/gh.js', './js/stats.js', './js/store.js',
+  './js/gh.js', './js/oauth.js', './js/stats.js', './js/store.js',
   './js/render/charts.js', './js/render/dashboard.js', './js/render/grid.js',
   './js/render/modals.js', './js/render/util.js',
 ];

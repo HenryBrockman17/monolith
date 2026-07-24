@@ -16,8 +16,15 @@ let onStatusChange = () => {};
 export function statusListener(fn) { onStatusChange = fn; }
 function setOnline(v) { if (online !== v) { online = v; onStatusChange(online, queueSize()); } }
 
-export function init(session) {
-  gh = new GitHubRepo({ token: session.pat, owner: session.owner, repo: session.repo, apiBase: session.apiBase });
+let onAuthExpired = () => {};
+export function authExpiredListener(fn) { onAuthExpired = fn; }
+
+export function init(session, tokenProvider = null) {
+  gh = new GitHubRepo({
+    token: session.pat || (session.creds ? (session.creds.access || session.creds.pat) : undefined),
+    tokenProvider,
+    owner: session.owner, repo: session.repo, apiBase: session.apiBase,
+  });
   dek = session.dek;
 }
 export function deinit() { gh = null; dek = null; }
@@ -93,7 +100,8 @@ async function doFlush() {
     }
     setOnline(true);
     return true;
-  } catch {
+  } catch (e) {
+    if (e && e.code === 'reauth') onAuthExpired(e.mode);
     setOnline(false);
     onStatusChange(false, loadQueue().length);
     return false;

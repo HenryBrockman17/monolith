@@ -2,6 +2,7 @@
 import * as store from './store.js';
 import * as api from './api.js';
 import * as auth from './auth.js';
+import * as oauth from './oauth.js';
 import * as S from './stats.js';
 import { MONTHS, MONTHS_SHORT, monthTimeline, todayYmd, parseYmd } from './cal.js';
 import { renderRoutines, renderAnalysis, analysisTipHtml } from './render/grid.js';
@@ -53,25 +54,60 @@ const EXAMPLE_SET = [
 ];
 
 /* ---------- auth screens ---------- */
-function showAuth() {
+let currentSession = null;
+let pendingOauth = null;      // creds waiting for the passphrase step after sign-in
+
+function showAuthCard(card) {
   $('appMain').style.display = 'none';
   $('authView').style.display = '';
+  for (const id of ['lockCard', 'setupCard', 'oauthFinishCard', 'reauthCard']) {
+    $(id).style.display = id === card ? '' : 'none';
+  }
+}
+
+function showAuth() {
   const locked = auth.hasVault();
-  $('lockCard').style.display = locked ? '' : 'none';
-  $('setupCard').style.display = locked ? 'none' : '';
+  showAuthCard(locked ? 'lockCard' : 'setupCard');
   if (locked) {
     const info = auth.vaultInfo();
     $('lockRepo').textContent = `${info.owner}/${info.repo}`;
     $('lockPass').value = '';
     $('lockPass').focus();
-  } else {
-    $('setupRepo').value = $('setupRepo').value || '';
-    $('setupToken').focus();
   }
 }
 
+function showReauth(mode) {
+  showAuthCard('reauthCard');
+  $('reauthOauth').style.display = mode === 'oauth' ? '' : 'none';
+  $('reauthPatForm').style.display = mode === 'pat' ? '' : 'none';
+  $('reauthErr').style.display = 'none';
+}
+
+/* Serves every GitHub call: hands out the current token, silently refreshing
+   OAuth tokens as they age out; throws AuthExpiredError when unrecoverable. */
+async function tokenProvider(force = false) {
+  const creds = currentSession?.creds;
+  if (!creds) throw new auth.AuthExpiredError('pat');
+  if (creds.mode !== 'oauth') {
+    if (force) throw new auth.AuthExpiredError('pat');        // a PAT that 401s is dead
+    return creds.pat;
+  }
+  const stale = force || creds.accessExp - Date.now() < 60000;
+  if (!stale) return creds.access;
+  if (!creds.refresh || (creds.refreshExp && creds.refreshExp < Date.now())) throw new auth.AuthExpiredError('oauth');
+  let fresh;
+  try {
+    fresh = await oauth.refreshTokens(creds.refresh);
+  } catch {
+    throw new auth.AuthExpiredError('oauth');
+  }
+  currentSession = await auth.updateCreds(fresh);             // reseal into vault + session
+  return fresh.access;
+}
+
 async function startApp(session) {
-  api.init(session);
+  currentSession = session;
+  api.init(session, tokenProvider);
   $('authView').style.display = 'none';
   $('appMain').style.display = '';
   try {
@@ -252,12 +288,72 @@ function wire() {
     const btn = $('lockBtn');
     btn.disabled = true; btn.textContent = 'Unlocking…';
     try {
-      const session = await auth.unlock($('lockPass').value);
+      const session = await auth.unlock($('lockPass').value, pendingOauth?.creds || null);
+      pendingOauth = null;
+      $('lockNote').style.display = 'none';
       await startApp(session);
     } catch (err) {
-      authError($('lockErr'), err.message);
+      if (err.code === 'reauth') showReauth(err.mode);
+      else authError($('lockErr'), err.message);
     } finally {
       btn.disabled = false; btn.textContent = 'Unlock';
+    }
+  });
+
+  /* sign in with GitHub — fresh setup and re-auth variants */
+  $('setupOauthBtn').addEventListener('click', () => oauth.beginLogin(false));
+  $('reauthOauthBtn').addEventListener('click', () => oauth.beginLogin(true));
+
+  /* passphrase step after OAuth sign-in on a fresh device */
+  $('oauthFinishForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('oauthFinishErr').style.display = 'none';
+    if (!pendingOauth) return showAuth();
+    const pass = $('ofPass').value;
+    if (pass.length < 10) return authError($('oauthFinishErr'), 'Passphrase must be at least 10 characters.');
+    if (pendingOauth.isNew && pass !== $('ofPass2').value) return authError($('oauthFinishErr'), 'Passphrases don’t match.');
+    const pick = $('ofRepo').value.split('/');
+    const btn = $('oauthFinishBtn');
+    btn.disabled = true; btn.textContent = 'Unlocking…';
+    try {
+      const session = await auth.setup({
+        creds: pendingOauth.creds, owner: pick[0], repo: pick[1], passphrase: pass,
+      });
+      pendingOauth = null;
+      await startApp(session);
+    } catch (err) {
+      authError($('oauthFinishErr'), err.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Unlock my data';
+    }
+  });
+
+  /* re-auth with a fresh manual token (PAT mode) */
+  $('reauthPatForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('reauthErr').style.display = 'none';
+    const pat = $('reauthToken').value.replace(/\s+/g, '');
+    if (!/^(github_pat_|ghp_)[A-Za-z0-9_]+$/.test(pat)) return authError($('reauthErr'), 'That doesn’t look like a GitHub token.');
+    const btn = $('reauthPatBtn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      if (currentSession) {
+        currentSession = await auth.updateCreds({ mode: 'pat', pat });
+        api.init(currentSession, tokenProvider);
+        $('authView').style.display = 'none';
+        $('appMain').style.display = '';
+        await api.flushQueue();
+        renderAll();
+      } else {
+        /* locked: stash the fresh PAT so unlock() uses it instead of the dead one */
+        pendingOauth = { creds: { mode: 'pat', pat }, isNew: false };
+        showAuth();
+        $('lockNote').style.display = '';
+      }
+    } catch (err) {
+      authError($('reauthErr'), err.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Save token';
     }
   });
   $('lockReset').addEventListener('click', () => {
@@ -359,6 +455,7 @@ function wire() {
   });
 
   api.statusListener(() => renderAll());
+  api.authExpiredListener(mode => showReauth(mode));
   window.addEventListener('online', () => api.flushQueue());
   setInterval(() => { if (!api.online) api.flushQueue(); }, 15000);
   /* enforce session expiry while the tab stays open */
@@ -370,11 +467,74 @@ function wire() {
 }
 
 /* ---------- boot ---------- */
+async function handleOauthReturn(cb) {
+  const creds = await oauth.exchangeCode(cb.code);
+
+  if (auth.hasVault()) {
+    /* re-linking an existing account */
+    const session = await auth.getSession();
+    if (session) {
+      currentSession = session;
+      currentSession = await auth.updateCreds(creds);
+      await startApp(currentSession);
+    } else {
+      pendingOauth = { creds, isNew: false };
+      showAuth();
+      $('lockNote').style.display = '';
+    }
+    return;
+  }
+
+  /* fresh device: find the data repo, then ask for the passphrase */
+  const repos = (await oauth.discoverRepos(creds.access)).filter(r => r.private);
+  if (!repos.length) {
+    showAuthCard('setupCard');
+    authError($('setupErr'), 'Signed in, but the Monolith app isn’t installed on any private repo. Install it on your data repo (GitHub → Settings → Applications → Monolith → Repository access), then sign in again.');
+    return;
+  }
+  const sel = $('ofRepo');
+  sel.innerHTML = repos.map(r => `<option value="${r.owner}/${r.repo}">${r.owner}/${r.repo}</option>`).join('');
+  sel.parentElement.style.display = repos.length > 1 ? '' : 'none';
+
+  async function refreshIsNew() {
+    const [owner, repo] = sel.value.split('/');
+    const gh = new (await import('./gh.js')).GitHubRepo({ token: creds.access, owner, repo });
+    const ks = await gh.getFile('keystore.json').catch(() => null);
+    pendingOauth = { creds, isNew: !ks };
+    $('ofPass2Row').style.display = pendingOauth.isNew ? '' : 'none';
+    $('ofNewNote').style.display = pendingOauth.isNew ? '' : 'none';
+    $('ofJoinNote').style.display = pendingOauth.isNew ? 'none' : '';
+  }
+  sel.onchange = refreshIsNew;
+  await refreshIsNew();
+  showAuthCard('oauthFinishCard');
+  $('ofPass').focus();
+}
+
 async function boot() {
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
   wire();
+
+  let cb = null;
+  try {
+    cb = oauth.consumeCallback();
+  } catch (e) {
+    showAuth();
+    authError(auth.hasVault() ? $('lockErr') : $('setupErr'), e.message);
+    return;
+  }
+  if (cb) {
+    try {
+      await handleOauthReturn(cb);
+    } catch (e) {
+      showAuth();
+      authError(auth.hasVault() ? $('lockErr') : $('setupErr'), `Sign-in failed: ${e.message}`);
+    }
+    return;
+  }
+
   const session = await auth.getSession();
   if (session) await startApp(session);
   else showAuth();

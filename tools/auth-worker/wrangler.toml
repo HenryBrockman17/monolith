@@ -1,0 +1,8 @@
+name = "monolith-auth"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+[vars]
+GITHUB_CLIENT_ID = "REPLACE_AFTER_APP_REGISTRATION"
+
+# The client secret is NOT set here — run:  wrangler secret put GITHUB_CLIENT_SECRET

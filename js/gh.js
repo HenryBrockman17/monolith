@@ -2,23 +2,36 @@
    Authorization header, never in URLs. apiBase is injectable for tests. */
 
 export class GitHubRepo {
-  constructor({ token, owner, repo, apiBase = 'https://api.github.com' }) {
+  /* Pass either a static `token`, or a `tokenProvider(forceRefresh) → string`
+     that refreshes expired OAuth tokens; a 401 triggers one forced-refresh
+     retry before giving up. */
+  constructor({ token, tokenProvider, owner, repo, apiBase = 'https://api.github.com' }) {
     this.token = token;
+    this.tokenProvider = tokenProvider;
     this.owner = owner;
     this.repo = repo;
     this.apiBase = apiBase.replace(/\/$/, '');
   }
 
-  async _fetch(path, opts = {}) {
+  async _auth(force = false) {
+    return this.tokenProvider ? this.tokenProvider(force) : this.token;
+  }
+
+  async _fetch(path, opts = {}, allowRetry = true) {
+    const token = await this._auth();
     const r = await fetch(`${this.apiBase}${path}`, {
       ...opts,
       headers: {
-        Authorization: `Bearer ${this.token}`,
+        Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         ...(opts.headers || {}),
       },
     });
+    if (r.status === 401 && this.tokenProvider && allowRetry) {
+      await this._auth(true);                   // throws AuthExpiredError if unrecoverable
+      return this._fetch(path, opts, false);
+    }
     return r;
   }
 

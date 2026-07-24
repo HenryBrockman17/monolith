@@ -101,6 +101,17 @@
   .auth-card input:focus { border-color: var(--ink-muted); }
   .auth-repo { font-size: 12px; color: var(--ink-muted); }
   .auth-repo span { color: var(--ink-2); }
+  .auth-note { font-size: 12.5px; color: #2ba447; }
+  .btn.github {
+    background: #1f2328; color: #fff; border: 1px solid var(--hairline-2);
+    font-weight: 600; padding: 11px 14px; font-size: 14px;
+  }
+  .btn.github:hover { background: #2a2f36; }
+  .auth-card details summary { font-size: 12px; color: var(--ink-muted); cursor: pointer; }
+  .auth-card select {
+    background: var(--surface-2); border: 1px solid var(--hairline-2); color: var(--ink);
+    border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: inherit; width: 100%;
+  }
   .auth-help { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
   .auth-warn { font-size: 12px; color: #c9762a; line-height: 1.4; }
   .auth-err { font-size: 12.5px; color: #e66767; line-height: 1.4; }
@@ -369,6 +380,7 @@
         <form class="auth-card" id="lockForm">
           <h3>Unlock</h3>
           <div class="auth-repo">Data: <span id="lockRepo"></span></div>
+          <div class="auth-note" id="lockNote" style="display:none">GitHub re-linked ✓ — enter your passphrase to finish.</div>
           <input type="password" id="lockPass" placeholder="Passphrase" autocomplete="current-password" required>
           <div class="auth-err" id="lockErr" style="display:none"></div>
           <button class="btn primary" id="lockBtn" type="submit">Unlock</button>
@@ -377,17 +389,55 @@
       </div>
 
       <div id="setupCard" style="display:none">
-        <form class="auth-card" id="setupForm">
+        <div class="auth-card">
           <h3>Set up this device</h3>
-          <p class="auth-help">You need a <b>private</b> GitHub repo for your data and a fine-grained access token scoped to only that repo (Contents: read &amp; write). Your token and habits are encrypted with your passphrase before anything is stored — GitHub only ever sees ciphertext.</p>
-          <input type="password" id="setupToken" placeholder="GitHub fine-grained token (github_pat_…)" autocomplete="off" required>
-          <input type="text" id="setupRepo" placeholder="Data repo — e.g. HenryBrockman17/monolith-data" autocomplete="off" spellcheck="false" required>
-          <input type="password" id="setupPass" placeholder="Choose a passphrase (10+ characters)" autocomplete="new-password" required>
-          <input type="password" id="setupPass2" placeholder="Repeat passphrase" autocomplete="new-password" required>
-          <p class="auth-warn">There is no passphrase recovery. Losing it means losing access to your encrypted history.</p>
+          <p class="auth-help">Sign in with your GitHub account — your password stays on github.com, and your habits are encrypted with a passphrase before anything is stored. GitHub only ever sees ciphertext.</p>
+          <button class="btn github" id="setupOauthBtn" type="button">Sign in with GitHub</button>
           <div class="auth-err" id="setupErr" style="display:none"></div>
-          <button class="btn primary" id="setupBtn" type="submit">Set up &amp; unlock</button>
+          <details>
+            <summary>Advanced: use a manual access token instead</summary>
+            <form id="setupForm" class="pass-form">
+              <input type="password" id="setupToken" placeholder="GitHub fine-grained token (github_pat_…)" autocomplete="off">
+              <input type="text" id="setupRepo" placeholder="Data repo — e.g. HenryBrockman17/monolith-data" autocomplete="off" spellcheck="false">
+              <input type="password" id="setupPass" placeholder="Choose a passphrase (10+ characters)" autocomplete="new-password">
+              <input type="password" id="setupPass2" placeholder="Repeat passphrase" autocomplete="new-password">
+              <button class="btn primary" id="setupBtn" type="submit">Set up &amp; unlock</button>
+            </form>
+          </details>
+          <p class="auth-warn">There is no passphrase recovery. Losing it means losing access to your encrypted history.</p>
+        </div>
+      </div>
+
+      <div id="oauthFinishCard" style="display:none">
+        <form class="auth-card" id="oauthFinishForm">
+          <h3>Signed in ✓ — unlock your data</h3>
+          <div class="field" style="display:none"><span>Data repo</span>
+            <select id="ofRepo"></select>
+          </div>
+          <p class="auth-help" id="ofJoinNote" style="display:none">This repo already holds your encrypted history. Enter the same passphrase you used before.</p>
+          <p class="auth-help" id="ofNewNote" style="display:none">First-time setup: choose the passphrase that will encrypt everything. 10+ characters.</p>
+          <input type="password" id="ofPass" placeholder="Passphrase" autocomplete="current-password" required>
+          <div id="ofPass2Row" style="display:none">
+            <input type="password" id="ofPass2" placeholder="Repeat passphrase" autocomplete="new-password" style="width:100%">
+          </div>
+          <div class="auth-err" id="oauthFinishErr" style="display:none"></div>
+          <button class="btn primary" id="oauthFinishBtn" type="submit">Unlock my data</button>
         </form>
+      </div>
+
+      <div id="reauthCard" style="display:none">
+        <div class="auth-card">
+          <h3>GitHub connection expired</h3>
+          <p class="auth-help">Your habits, settings, and passphrase are untouched — GitHub just needs to re-approve this device.</p>
+          <div id="reauthOauth" style="display:none">
+            <button class="btn github" id="reauthOauthBtn" type="button" style="width:100%">Sign in with GitHub again</button>
+          </div>
+          <form id="reauthPatForm" class="pass-form" style="display:none">
+            <input type="password" id="reauthToken" placeholder="Paste a fresh token (github_pat_…)" autocomplete="off">
+            <button class="btn primary" id="reauthPatBtn" type="submit">Save token</button>
+          </form>
+          <div class="auth-err" id="reauthErr" style="display:none"></div>
+        </div>
       </div>
     </div>
   </div>

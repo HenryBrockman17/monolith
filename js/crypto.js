@@ -21,12 +21,21 @@ export function randomBytes(n) {
 
 export async function deriveKek(passphrase, saltB64, iterations = KDF_ITERATIONS) {
   const base = await crypto.subtle.importKey('raw', te.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  /* extractable so the session can hold the KEK and re-seal rotated OAuth
+     tokens into the vault without re-asking for the passphrase */
   return crypto.subtle.deriveKey(
     { name: 'PBKDF2', hash: 'SHA-256', salt: unb64(saltB64), iterations },
     base,
     { name: 'AES-GCM', length: 256 },
-    false, ['encrypt', 'decrypt'],
+    true, ['encrypt', 'decrypt'],
   );
+}
+
+export async function exportKeyB64(key) {
+  return b64(await crypto.subtle.exportKey('raw', key));
+}
+export async function importKek(rawB64) {
+  return crypto.subtle.importKey('raw', unb64(rawB64), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
 }
 
 export async function generateDek() {
