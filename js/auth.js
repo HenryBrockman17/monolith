@@ -57,23 +57,25 @@ export async function setup({ pat, owner, repo, passphrase, apiBase = 'https://a
   if (!access.pushable) throw new Error('Token has read access but not write access to this repo. Re-create it with Contents: Read and write.');
 
   const existing = await gh.getFile('keystore.json');
-  let dekRawB64, kek;
+  let dekRawB64, kek, keystore;
   if (existing) {
+    keystore = JSON.parse(existing.text);
     let unlocked;
     try {
-      unlocked = await C.unlockKeystore(passphrase, JSON.parse(existing.text));
+      unlocked = await C.unlockKeystore(passphrase, keystore);
     } catch {
       throw new Error('This repo already has a keystore and that passphrase doesn’t open it. Use the same passphrase you set up the first device with.');
     }
     ({ kek, dekRawB64 } = { kek: unlocked.kek, dekRawB64: unlocked.dekRawB64 });
   } else {
+    /* keep the created keystore in memory — a GET right after the PUT can 404
+       (GitHub's contents API is eventually consistent on fresh files) */
     const created = await C.createKeystore(passphrase);
-    await gh.putFile('keystore.json', JSON.stringify(created.keystore, null, 2), 'monolith: initialize keystore');
-    kek = await C.deriveKek(passphrase, created.keystore.kdf.salt);
-    dekRawB64 = await C.open(kek, created.keystore.dek);
+    keystore = created.keystore;
+    await gh.putFile('keystore.json', JSON.stringify(keystore, null, 2), 'monolith: initialize keystore');
+    kek = await C.deriveKek(passphrase, keystore.kdf.salt);
+    dekRawB64 = await C.open(kek, keystore.dek);
   }
-
-  const keystore = existing ? JSON.parse(existing.text) : JSON.parse((await gh.getFile('keystore.json')).text);
   localStorage.setItem(VAULT_KEY, JSON.stringify({
     v: 1, owner, repo, apiBase,
     kdf: keystore.kdf,
