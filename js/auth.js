@@ -51,7 +51,10 @@ export function resetDevice() {
    user-presentable message on any failure. */
 export async function setup({ pat, owner, repo, passphrase, apiBase = 'https://api.github.com' }) {
   const gh = new GitHubRepo({ token: pat, owner, repo, apiBase });
-  const access = await gh.checkAccess().catch(() => ({ ok: false, reason: 'Could not reach GitHub — check your connection.' }));
+  const access = await gh.checkAccess().catch(e => ({
+    ok: false,
+    reason: `Could not reach GitHub (${e?.message || 'network error'}). Hard-refresh this page (Shift+Reload) and re-copy the token if it repeats.`,
+  }));
   if (!access.ok) throw new Error(access.reason);
   if (!access.private) throw new Error('That repo is PUBLIC. Your data would be world-readable (even encrypted, commit times leak your activity). Make it private first.');
   if (!access.pushable) throw new Error('Token has read access but not write access to this repo. Re-create it with Contents: Read and write.');

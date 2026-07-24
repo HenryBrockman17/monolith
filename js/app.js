@@ -276,6 +276,8 @@ function wire() {
     $('setupErr').style.display = 'none';
     const pass = $('setupPass').value, pass2 = $('setupPass2').value;
     const repoFull = $('setupRepo').value.trim();
+    const pat = $('setupToken').value.replace(/\s+/g, '');   // strip any pasted whitespace/newlines
+    if (!/^(github_pat_|ghp_)[A-Za-z0-9_]+$/.test(pat)) return authError($('setupErr'), 'That doesn’t look like a GitHub token — it should start with github_pat_. Re-copy the whole value.');
     if (!/^[\w.-]+\/[\w.-]+$/.test(repoFull)) return authError($('setupErr'), 'Repo must look like owner/name, e.g. HenryBrockman17/monolith-data');
     if (pass.length < 10) return authError($('setupErr'), 'Passphrase must be at least 10 characters. A few random words works well.');
     if (pass !== pass2) return authError($('setupErr'), 'Passphrases don’t match.');
@@ -283,7 +285,7 @@ function wire() {
     const btn = $('setupBtn');
     btn.disabled = true; btn.textContent = 'Setting up…';
     try {
-      const session = await auth.setup({ pat: $('setupToken').value.trim(), owner, repo, passphrase: pass });
+      const session = await auth.setup({ pat, owner, repo, passphrase: pass });
       await startApp(session);
     } catch (err) {
       authError($('setupErr'), err.message);
