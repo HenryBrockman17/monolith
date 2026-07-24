@@ -170,9 +170,20 @@
   table.routines { border-collapse: collapse; white-space: nowrap; }
   table.routines th, table.routines td { padding: 0; text-align: center; font-weight: 400; }
 
+  .grip-cell { width: 26px; min-width: 26px; position: sticky; left: 0; background: var(--surface); z-index: 2; }
+  .grip {
+    display: inline-block; color: var(--ink-muted); cursor: grab; font-size: 12px; padding: 2px 7px;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  .grip:hover { color: var(--ink); }
+  tr.habit-row.dragging { position: relative; z-index: 5; }
+  tr.habit-row.dragging td { background: var(--surface-2); }
+  tr.habit-row.dragging .grip { cursor: grabbing; }
+  body.drag-noselect, body.drag-noselect * { user-select: none !important; -webkit-user-select: none !important; }
+
   .rt-name {
     text-align: left !important; padding: 0 14px 0 4px !important;
-    font-size: 13px; min-width: 190px; position: sticky; left: 0; background: var(--surface); z-index: 2;
+    font-size: 13px; min-width: 190px; position: sticky; left: 26px; background: var(--surface); z-index: 2;
   }
   td.rt-name { cursor: pointer; border-radius: 6px; }
   td.rt-name:hover { background: var(--surface-2); }

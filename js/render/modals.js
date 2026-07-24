@@ -2,7 +2,7 @@
 import { esc } from './util.js';
 
 export function openHabitModal(opts) {
-  const { habit, onSave, onArchive, onRestore, onDelete, onMove, checkCount = 0 } = opts;
+  const { habit, onSave, onArchive, onRestore, onDelete, checkCount = 0 } = opts;
   const isNew = !habit;
   close();
 
@@ -26,12 +26,6 @@ export function openHabitModal(opts) {
         </div>
       </div>
       ${!isNew ? `
-      <div class="field"><span>Position</span>
-        <div class="row-gap">
-          <button type="button" class="btn ghost" id="mUp">↑ Move up</button>
-          <button type="button" class="btn ghost" id="mDown">↓ Move down</button>
-        </div>
-      </div>
       <div class="modal-danger">
         ${habit.archivedOn
           ? '<button type="button" class="btn ghost" id="mRestore">Restore routine</button>'
@@ -67,8 +61,6 @@ export function openHabitModal(opts) {
     close();
   };
   if (!isNew) {
-    $('mUp').onclick = () => onMove(-1);
-    $('mDown').onclick = () => onMove(1);
     if ($('mArchive')) $('mArchive').onclick = () => { onArchive(); close(); };
     if ($('mRestore')) $('mRestore').onclick = () => { onRestore(); close(); };
     /* two-step delete: first click arms it */

@@ -55,14 +55,15 @@ export function renderRoutines(el, state, y, m, tl) {
   const weeks = weeksOf(tl);
   const today = todayYmd();
   const habits = S.visibleHabits(state, y, m);
+  const gripTh = '<th class="grip-cell"></th>';
   const nameTh = '<th class="rt-name"></th>';
   const goalTh = '<th class="rt-goal"></th>';
 
   let html = headerRows(weeks, today,
     {
-      band: nameTh + goalTh, mon: nameTh + goalTh,
-      wd: nameTh + '<th class="rt-goal" style="font-size:10px;color:var(--ink-muted)">GOAL</th>',
-      num: nameTh + goalTh,
+      band: gripTh + nameTh + goalTh, mon: gripTh + nameTh + goalTh,
+      wd: gripTh + nameTh + '<th class="rt-goal" style="font-size:10px;color:var(--ink-muted)">GOAL</th>',
+      num: gripTh + nameTh + goalTh,
     },
     {
       band: '<th colspan="4"></th>', mon: '<th colspan="4"></th>',
@@ -76,7 +77,9 @@ export function renderRoutines(el, state, y, m, tl) {
     const open = Math.max(0, goal - done);
     const pct = Math.min(100, pctRound(done, goal));
     const archived = h.archivedOn ? ' <span class="archived-tag">archived</span>' : '';
-    html += `<tr class="habit-row"><td class="rt-name" data-edit="${h.id}" title="Edit routine">${esc(h.name)} ${esc(h.emoji)}${archived}</td>` +
+    html += `<tr class="habit-row" data-habit-row="${h.id}">` +
+      `<td class="grip-cell"><span class="grip" data-grip="${h.id}" title="Drag to reorder" aria-label="Drag to reorder">☰</span></td>` +
+      `<td class="rt-name" data-edit="${h.id}" title="Edit routine">${esc(h.name)} ${esc(h.emoji)}${archived}</td>` +
       `<td class="rt-goal">${h.targetPerWeek}×/wk</td>`;
     weeks.forEach((w, wi) => {
       for (const t of w) {
@@ -103,7 +106,7 @@ export function renderRoutines(el, state, y, m, tl) {
   }
 
   const width = weeks.length * 7 + weeks.length + 4;
-  html += `<tr class="add-row"><td class="rt-name" id="addRoutine">+ Add routine</td><td colspan="${width}"></td></tr>`;
+  html += `<tr class="add-row"><td class="grip-cell"></td><td class="rt-name" id="addRoutine">+ Add routine</td><td colspan="${width}"></td></tr>`;
 
   el.innerHTML = html;
 }

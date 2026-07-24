@@ -4,11 +4,12 @@ import * as api from './api.js';
 import * as auth from './auth.js';
 import * as oauth from './oauth.js';
 import * as S from './stats.js';
-import { MONTHS, MONTHS_SHORT, monthTimeline, todayYmd, parseYmd } from './cal.js';
+import { MONTHS, MONTHS_SHORT, monthTimeline, todayYmd, parseYmd, ymd } from './cal.js';
 import { renderRoutines, renderAnalysis, analysisTipHtml } from './render/grid.js';
 import { renderArea, renderGauge, renderLeaderboard, renderStreaks } from './render/charts.js';
 import { renderDashboard } from './render/dashboard.js';
 import { openHabitModal, openSettingsModal, showToast } from './render/modals.js';
+import { attachDragOrder } from './render/dragorder.js';
 import { showTip, hideTip } from './render/util.js';
 
 /* Clickjacking guard — GitHub Pages can't send X-Frame-Options headers. */
@@ -26,14 +27,18 @@ const DEFAULT_ACCENT = '#3aa6c2';
 const ACCENTS = ['#3aa6c2', '#2ba447', '#a06fe6', '#2057c9', '#7d8ce0', '#c25da0'];
 
 /* ---------- mutations ---------- */
+let demoMode = false;                   // ?demo=1 — seeded board, nothing persisted
+
 function mutate(events) {
   for (const ev of events) {
     ev.seq = state.lastSeq + 1;         // local fold order; file line order is canonical
     store.apply(state, ev);
     allEvents.push(ev);
   }
-  api.append(events);
-  api.cacheState(store.serialize(state));
+  if (!demoMode) {
+    api.append(events);
+    api.cacheState(store.serialize(state));
+  }
   renderAll();
 }
 
@@ -208,13 +213,6 @@ function openEditHabit(id) {
       if (f.emoji !== h.emoji) changes.emoji = [h.emoji, f.emoji];
       if (f.targetPerWeek !== h.targetPerWeek) changes.targetPerWeek = [h.targetPerWeek, f.targetPerWeek];
       if (Object.keys(changes).length) mutate([store.makeEvent('habit.update', { id, changes })]);
-    },
-    onMove: dir => {
-      const order = [...state.habits.values()].sort((a, b) => a.order - b.order).map(x => x.id);
-      const i = order.indexOf(id), j = i + dir;
-      if (j < 0 || j >= order.length) return;
-      [order[i], order[j]] = [order[j], order[i]];
-      mutate([store.makeEvent('habit.reorder', { order })]);
     },
     onArchive: () => {
       mutate([store.makeEvent('habit.archive', { id, on: todayYmd() })]);
@@ -454,12 +452,26 @@ function wire() {
       })));
   });
 
+  attachDragOrder($('routinesTable'), {
+    rowSelector: 'tr.habit-row',
+    gripSelector: '[data-grip]',
+    onReorder: domIds => {
+      /* merge: rows hidden in this month view keep their absolute positions */
+      const all = [...state.habits.values()].sort((a, b) => a.order - b.order).map(h => h.id);
+      const visible = new Set(domIds);
+      let vi = 0;
+      const merged = all.map(id => (visible.has(id) ? domIds[vi++] : id));
+      mutate([store.makeEvent('habit.reorder', { order: merged })]);
+    },
+  });
+
   api.statusListener(() => renderAll());
   api.authExpiredListener(mode => showReauth(mode));
   window.addEventListener('online', () => api.flushQueue());
   setInterval(() => { if (!api.online) api.flushQueue(); }, 15000);
   /* enforce session expiry while the tab stays open */
   setInterval(async () => {
+    if (demoMode) return;
     if ($('appMain').style.display !== 'none' && !(await auth.getSession())) {
       api.deinit(); state = store.emptyState(); allEvents = []; showAuth();
     }
@@ -511,11 +523,49 @@ async function handleOauthReturn(cb) {
   $('ofPass').focus();
 }
 
+/* Seeded demo board for design work — 45 days of plausible history, no auth,
+   no persistence. Open with ?demo=1 */
+function buildDemoState() {
+  const s = store.emptyState();
+  let seed = 1337;
+  const rand = () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+  const start = new Date();
+  start.setDate(start.getDate() - 45);
+  EXAMPLE_SET.forEach(([name, emoji, target], i) => {
+    store.apply(s, { seq: s.lastSeq + 1, type: 'habit.create', data: {
+      id: 'demo_' + i, name, emoji, targetPerWeek: target, order: i, createdOn: ymd(start),
+    } });
+  });
+  const today = todayYmd();
+  for (const d = new Date(start); ymd(d) <= today; d.setDate(d.getDate() + 1)) {
+    EXAMPLE_SET.forEach(([, , target], i) => {
+      if (rand() < 0.85 * target / 7) {
+        store.apply(s, { seq: s.lastSeq + 1, type: 'check.set', data: { habit: 'demo_' + i, date: ymd(d), value: true } });
+      }
+    });
+  }
+  return s;
+}
+
 async function boot() {
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
   wire();
+
+  if (new URLSearchParams(location.search).get('demo') === '1') {
+    demoMode = true;
+    state = buildDemoState();
+    $('authView').style.display = 'none';
+    $('appMain').style.display = '';
+    renderAll();
+    return;
+  }
 
   let cb = null;
   try {
