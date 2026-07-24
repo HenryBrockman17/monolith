@@ -5,11 +5,11 @@ import * as auth from './auth.js';
 import * as oauth from './oauth.js';
 import * as S from './stats.js';
 import { MONTHS, MONTHS_SHORT, monthTimeline, todayYmd, parseYmd, ymd } from './cal.js';
-import { renderRoutines, renderAnalysis, analysisTipHtml } from './render/grid.js';
+import { renderRoutines, renderAnalysis, renderWeekStrip, analysisTipHtml } from './render/grid.js';
 import { renderArea, renderGauge, renderLeaderboard, renderStreaks } from './render/charts.js';
 import { renderDashboard } from './render/dashboard.js';
 import { openHabitModal, openSettingsModal, showToast } from './render/modals.js';
-import { attachDragOrder } from './render/dragorder.js';
+import { attachDragOrder, attachLongPressDrag } from './render/dragorder.js';
 import { showTip, hideTip } from './render/util.js';
 
 /* Clickjacking guard — GitHub Pages can't send X-Frame-Options headers. */
@@ -25,6 +25,13 @@ let view = { kind: 'month', y: now.getFullYear(), m: now.getMonth() + 1 };
 const $ = id => document.getElementById(id);
 const DEFAULT_ACCENT = '#3aa6c2';
 const ACCENTS = ['#3aa6c2', '#2ba447', '#a06fe6', '#2057c9', '#7d8ce0', '#c25da0'];
+
+/* mobile board state */
+const mqMobile = matchMedia('(max-width: 700px)');
+const forceMobile = new URLSearchParams(location.search).has('mobile');  // preview override
+const isMobile = () => forceMobile || mqMobile.matches;
+let boardMode = localStorage.getItem('monolith.boardMode') || 'week';   // phones only
+let wsWeek = null;                                                      // null → week containing today
 
 /* ---------- mutations ---------- */
 let demoMode = false;                   // ?demo=1 — seeded board, nothing persisted
@@ -182,7 +189,26 @@ function renderAll() {
   const tl = monthTimeline(view.y, view.m);
   renderArea($('areaChart'), state, view.y, view.m);
   renderGauge($('gauge'), $('gaugeNum'), $('gaugeSub'), state, view.y, view.m);
-  renderRoutines($('routinesTable'), state, view.y, view.m, tl);
+
+  const mobile = isMobile();
+  $('boardToggle').style.display = mobile ? '' : 'none';
+  if (mobile && boardMode === 'week') {
+    $('monthGridWrap').style.display = 'none';
+    $('weekStrip').style.display = '';
+    if (wsWeek === null) {
+      const today = todayYmd();
+      const idx = Math.floor(tl.findIndex(t => t.date === today) / 7);
+      wsWeek = idx >= 0 ? idx : 0;
+    }
+    renderWeekStrip($('weekStrip'), state, view.y, view.m, tl, wsWeek);
+    $('boardToggle').textContent = 'MONTH';
+  } else {
+    $('weekStrip').style.display = 'none';
+    $('monthGridWrap').style.display = '';
+    renderRoutines($('routinesTable'), state, view.y, view.m, tl);
+    if (mobile) $('boardToggle').textContent = 'WEEK';
+  }
+
   renderAnalysis($('analysisTable'), state, view.y, view.m, tl);
   renderLeaderboard($('leaderboard'), state, view.y, view.m);
   renderStreaks($('streaks'), state);
@@ -396,10 +422,11 @@ function wire() {
     view = tab.dataset.tab === 'dash'
       ? { kind: 'year', y: view.y }
       : { kind: 'month', y: view.y, m: Number(tab.dataset.tab) };
+    wsWeek = null;
     renderAll();
   });
-  $('yearPrev').addEventListener('click', () => { view.y--; renderAll(); });
-  $('yearNext').addEventListener('click', () => { view.y++; renderAll(); });
+  $('yearPrev').addEventListener('click', () => { view.y--; wsWeek = null; renderAll(); });
+  $('yearNext').addEventListener('click', () => { view.y++; wsWeek = null; renderAll(); });
 
   /* month view */
   $('monthView').addEventListener('click', e => {
@@ -452,18 +479,32 @@ function wire() {
       })));
   });
 
+  /* merge: rows hidden in this month view keep their absolute positions */
+  const commitReorder = domIds => {
+    const all = [...state.habits.values()].sort((a, b) => a.order - b.order).map(h => h.id);
+    const visible = new Set(domIds);
+    let vi = 0;
+    const merged = all.map(id => (visible.has(id) ? domIds[vi++] : id));
+    mutate([store.makeEvent('habit.reorder', { order: merged })]);
+  };
   attachDragOrder($('routinesTable'), {
-    rowSelector: 'tr.habit-row',
-    gripSelector: '[data-grip]',
-    onReorder: domIds => {
-      /* merge: rows hidden in this month view keep their absolute positions */
-      const all = [...state.habits.values()].sort((a, b) => a.order - b.order).map(h => h.id);
-      const visible = new Set(domIds);
-      let vi = 0;
-      const merged = all.map(id => (visible.has(id) ? domIds[vi++] : id));
-      mutate([store.makeEvent('habit.reorder', { order: merged })]);
-    },
+    rowSelector: 'tr.habit-row', gripSelector: '[data-grip]', onReorder: commitReorder,
   });
+  attachLongPressDrag($('weekStrip'), {
+    rowSelector: '.ws-row', handleSelector: '.ws-name', onReorder: commitReorder,
+  });
+
+  /* mobile board controls */
+  $('boardToggle').addEventListener('click', () => {
+    boardMode = boardMode === 'week' ? 'month' : 'week';
+    localStorage.setItem('monolith.boardMode', boardMode);
+    renderAll();
+  });
+  $('weekStrip').addEventListener('click', e => {
+    if (e.target.closest('[data-ws-prev]')) { wsWeek = Math.max(0, wsWeek - 1); renderAll(); }
+    else if (e.target.closest('[data-ws-next]')) { wsWeek = wsWeek + 1; renderAll(); }
+  });
+  mqMobile.addEventListener('change', () => renderAll());
 
   api.statusListener(() => renderAll());
   api.authExpiredListener(mode => showReauth(mode));

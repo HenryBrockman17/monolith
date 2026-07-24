@@ -111,6 +111,50 @@ export function renderRoutines(el, state, y, m, tl) {
   el.innerHTML = html;
 }
 
+/* Mobile board: one Sun–Sat week, thumb-sized cells. Same data attributes as
+   the month grid, so all existing click delegation just works. */
+export function renderWeekStrip(el, state, y, m, tl, weekIdx) {
+  const weeks = weeksOf(tl);
+  const wi = Math.max(0, Math.min(weekIdx, weeks.length - 1));
+  const w = weeks[wi];
+  const today = todayYmd();
+  const habits = S.visibleHabits(state, y, m);
+  const first = w[0], last = w[6];
+  const range = `${first.mon} ${first.n} – ${last.mon === first.mon ? '' : last.mon + ' '}${last.n}`;
+
+  let html = `
+  <div class="ws-head">
+    <button class="ws-nav" data-ws-prev ${wi === 0 ? 'disabled' : ''}>‹</button>
+    <div class="ws-label" style="color:${WEEK_COLORS[wi]}">WEEK ${wi + 1} · ${range}</div>
+    <button class="ws-nav" data-ws-next ${wi === weeks.length - 1 ? 'disabled' : ''}>›</button>
+  </div>
+  <div class="ws-days">${w.map(t =>
+    `<div class="ws-day${t.date === today ? ' today' : ''}${t.inMonth ? '' : ' spill'}"><span>${t.wd[0]}</span><b>${t.n}</b></div>`).join('')}
+  </div>`;
+
+  for (const h of habits) {
+    const done = w.filter(t => S.isChecked(state, h.id, t.date)).length;
+    const archived = h.archivedOn ? ' <span class="archived-tag">archived</span>' : '';
+    html += `<div class="ws-row" data-habit-row="${h.id}">
+      <div class="ws-name" data-edit="${h.id}">${esc(h.name)} ${esc(h.emoji)}${archived}</div>
+      <div class="ws-count${done >= h.targetPerWeek ? ' hit' : ''}">${done}/${h.targetPerWeek}</div>
+      <div class="ws-cells">`;
+    for (const t of w) {
+      const on = S.isChecked(state, h.id, t.date);
+      const future = t.date > today;
+      const spill = !t.inMonth || !activeOn(h, t.date);
+      if (future) {
+        html += `<div class="ws-cell"><div class="cb future"></div></div>`;
+      } else {
+        html += `<div class="ws-cell cb-cell" data-habit="${h.id}" data-date="${t.date}"><div class="cb${on ? ' checked' : ''}${spill ? ' spill' : ''}">${on ? '✓' : ''}</div></div>`;
+      }
+    }
+    html += '</div></div>';
+  }
+  html += '<div class="ws-add" id="addRoutine">+ Add routine</div>';
+  el.innerHTML = html;
+}
+
 export function renderAnalysis(el, state, y, m, tl) {
   const weeks = weeksOf(tl);
   const today = todayYmd();

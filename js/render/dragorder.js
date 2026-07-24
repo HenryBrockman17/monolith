@@ -13,8 +13,51 @@ export function attachDragOrder(root, { rowSelector, gripSelector, onReorder }) 
   });
 }
 
+/* Mobile: press-and-hold a handle (e.g. the routine name) to pick the row up.
+   Moving > 10px before the hold completes cancels it and lets the page
+   scroll normally — the standard iOS reorder gesture. */
+export function attachLongPressDrag(root, { rowSelector, handleSelector, onReorder, delay = 400 }) {
+  root.addEventListener('contextmenu', e => {
+    if (e.target.closest(handleSelector)) e.preventDefault();   // iOS callout
+  });
+  root.addEventListener('pointerdown', e => {
+    const handle = e.target.closest(handleSelector);
+    if (!handle) return;
+    const row = handle.closest(rowSelector);
+    if (!row) return;
+    const startX = e.clientX, startY = e.clientY;
+
+    const cancel = () => {
+      clearTimeout(timer);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', cancel);
+      document.removeEventListener('pointercancel', cancel);
+    };
+    const onMove = ev => {
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10) cancel();
+    };
+    const timer = setTimeout(() => {
+      cancel();
+      suppressNextClick();                 // the lift itself must not open the editor
+      startDrag(e, handle, row, rowSelector, onReorder);
+    }, delay);
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', cancel);
+    document.addEventListener('pointercancel', cancel);
+  });
+}
+
 function rowsOf(row, rowSelector) {
-  return [...row.closest('tbody, table').querySelectorAll(rowSelector)];
+  return [...row.parentElement.querySelectorAll(rowSelector)];
+}
+
+/* Eat the click that browsers synthesize after a drag's pointerup, so a drag
+   that started on a clickable handle doesn't also "click" it. */
+function suppressNextClick() {
+  const stop = ev => { ev.stopPropagation(); ev.preventDefault(); };
+  document.addEventListener('click', stop, { capture: true, once: true });
+  setTimeout(() => document.removeEventListener('click', stop, { capture: true }), 350);
 }
 
 /* FLIP: mutate the DOM, then animate the element from its old position. */
@@ -88,7 +131,10 @@ function startDrag(e0, grip, row, rowSelector, onReorder) {
     }, 160);
 
     const endOrder = rowsOf(row, rowSelector).map(r => r.dataset.habitRow);
-    if (endOrder.join() !== startOrder.join()) onReorder(endOrder);
+    if (endOrder.join() !== startOrder.join()) {
+      suppressNextClick();
+      onReorder(endOrder);
+    }
   };
 
   document.addEventListener('pointermove', move);

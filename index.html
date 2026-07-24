@@ -374,6 +374,66 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.5);
   }
   #tip .t-sub { color: var(--ink-2); font-size: 11px; }
+
+  /* ---------- week strip (mobile board) ---------- */
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .card-head h2 { margin-bottom: 0; }
+
+  .ws-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .ws-nav {
+    width: 36px; height: 36px; border-radius: 10px; font-size: 16px; cursor: pointer;
+    background: var(--surface-2); border: 1px solid var(--hairline-2); color: var(--ink-2);
+  }
+  .ws-nav:disabled { opacity: 0.3; }
+  .ws-label { flex: 1; text-align: center; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; }
+  .ws-days { display: flex; gap: 6px; margin-bottom: 4px; }
+  .ws-day { width: 38px; text-align: center; line-height: 1.2; }
+  .ws-day span { display: block; font-size: 9.5px; color: var(--ink-muted); }
+  .ws-day b { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .ws-day.today b, .ws-day.today span { color: var(--ink); }
+  .ws-day.spill b { color: var(--ink-muted); }
+  .ws-row {
+    display: grid; grid-template-columns: 1fr auto; grid-template-areas: "name count" "cells cells";
+    padding: 8px 0 10px; border-top: 1px solid var(--hairline);
+  }
+  .ws-name {
+    grid-area: name; font-size: 14px; padding: 2px 4px 8px 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  .ws-count { grid-area: count; font-size: 11.5px; color: var(--ink-muted); font-variant-numeric: tabular-nums; padding-top: 4px; }
+  .ws-count.hit { color: #2ba447; font-weight: 700; }
+  .ws-cells { grid-area: cells; display: flex; gap: 6px; }
+  .ws-cell { width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; }
+  .ws-cell .cb { width: 26px; height: 26px; border-radius: 7px; font-size: 16px; border-width: 2px; }
+  .ws-add { color: var(--ink-muted); font-size: 13px; padding: 12px 4px 2px; cursor: pointer; border-top: 1px solid var(--hairline); }
+  .ws-row.dragging { background: var(--surface-2); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.55); border-top-color: transparent; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 700px) {
+    body { padding: 10px 10px calc(16px + env(safe-area-inset-bottom)); -webkit-tap-highlight-color: transparent; }
+    .app { gap: 12px; }
+    header { padding-bottom: 10px; }
+    .wordmark .moai { font-size: 21px; }
+    .wordmark h1 { font-size: 16px; }
+    .wordmark span.tag { display: none; }
+    .view-label { display: none; }
+    .hdr-right { gap: 10px; }
+    .month-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 4px 0; scrollbar-width: none; }
+    .month-tabs::-webkit-scrollbar { display: none; }
+    .month-tab { flex: 0 0 auto; }
+    .card { padding: 14px; border-radius: 12px; }
+    .top-row { gap: 12px; }
+    .bottom-row { gap: 12px; }
+    .gauge-num { font-size: 30px; }
+    .lb-name, .streak-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .streak-days { display: none; }              /* dots don't fit; streak count carries it */
+    .grip-cell { display: none; }                /* mobile reorders by long-pressing the name */
+    .rt-name { left: 0; }
+    .dash-months { overflow-x: auto; }
+    .dash-mcol { min-width: 34px; }
+    .modal { width: calc(100vw - 32px); }
+  }
 </style>
 </head>
 <body>
@@ -507,8 +567,12 @@
       </section>
 
       <section class="card">
-        <h2>Daily Routines</h2>
-        <div class="scroll-x"><table class="routines" id="routinesTable"></table></div>
+        <div class="card-head">
+          <h2>Daily Routines</h2>
+          <button class="btn-export" id="boardToggle" type="button" style="display:none">MONTH</button>
+        </div>
+        <div id="weekStrip" style="display:none"></div>
+        <div class="scroll-x" id="monthGridWrap"><table class="routines" id="routinesTable"></table></div>
       </section>
 
       <section class="card">
