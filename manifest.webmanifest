@@ -1,0 +1,13 @@
+{
+  "name": "Monolith — Daily Habit Tracker",
+  "short_name": "Monolith",
+  "description": "End-to-end encrypted daily habit tracker.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a0a0b",
+  "theme_color": "#0a0a0b",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

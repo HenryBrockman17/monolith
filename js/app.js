@@ -1,0 +1,381 @@
+/* Boot, auth flow, view routing, event wiring. Mutations flow through mutate(). */
+import * as store from './store.js';
+import * as api from './api.js';
+import * as auth from './auth.js';
+import * as S from './stats.js';
+import { MONTHS, MONTHS_SHORT, monthTimeline, todayYmd, parseYmd } from './cal.js';
+import { renderRoutines, renderAnalysis, analysisTipHtml } from './render/grid.js';
+import { renderArea, renderGauge, renderLeaderboard, renderStreaks } from './render/charts.js';
+import { renderDashboard } from './render/dashboard.js';
+import { openHabitModal, openSettingsModal, showToast } from './render/modals.js';
+import { showTip, hideTip } from './render/util.js';
+
+/* Clickjacking guard — GitHub Pages can't send X-Frame-Options headers. */
+if (window.top !== window.self) {
+  try { window.top.location = window.self.location; } catch { document.documentElement.innerHTML = ''; }
+}
+
+let state = store.emptyState();
+let allEvents = [];                     // plaintext copy for decrypted export
+const now = new Date();
+let view = { kind: 'month', y: now.getFullYear(), m: now.getMonth() + 1 };
+
+const $ = id => document.getElementById(id);
+const DEFAULT_ACCENT = '#3aa6c2';
+const ACCENTS = ['#3aa6c2', '#2ba447', '#a06fe6', '#2057c9', '#7d8ce0', '#c25da0'];
+
+/* ---------- mutations ---------- */
+function mutate(events) {
+  for (const ev of events) {
+    ev.seq = state.lastSeq + 1;         // local fold order; file line order is canonical
+    store.apply(state, ev);
+    allEvents.push(ev);
+  }
+  api.append(events);
+  api.cacheState(store.serialize(state));
+  renderAll();
+}
+
+function checkCtx(date) {
+  const today = todayYmd();
+  return {
+    view: view.kind === 'month' ? `month:${view.y}-${String(view.m).padStart(2, '0')}` : `year:${view.y}`,
+    today,
+    backfillDays: Math.round((parseYmd(today) - parseYmd(date)) / 86400000),
+  };
+}
+
+const EXAMPLE_SET = [
+  ['Wake up early', '⏰', 7], ['Time with God', '🙏', 7], ['Deep Work', '💻', 5],
+  ['No Alcohol', '🍷', 7], ['Cold Shower', '🚿', 6], ['No Porn', '🚫', 7],
+  ['Gym', '🏋️', 4], ['Budget tracking', '💰', 3], ['Goal tracking', '📋', 3],
+  ['Reading/Meditating', '📖', 5],
+];
+
+/* ---------- auth screens ---------- */
+function showAuth() {
+  $('appMain').style.display = 'none';
+  $('authView').style.display = '';
+  const locked = auth.hasVault();
+  $('lockCard').style.display = locked ? '' : 'none';
+  $('setupCard').style.display = locked ? 'none' : '';
+  if (locked) {
+    const info = auth.vaultInfo();
+    $('lockRepo').textContent = `${info.owner}/${info.repo}`;
+    $('lockPass').value = '';
+    $('lockPass').focus();
+  } else {
+    $('setupRepo').value = $('setupRepo').value || '';
+    $('setupToken').focus();
+  }
+}
+
+async function startApp(session) {
+  api.init(session);
+  $('authView').style.display = 'none';
+  $('appMain').style.display = '';
+  try {
+    allEvents = await api.loadAll();
+    state = store.emptyState();
+    allEvents.forEach((ev, i) => { ev.seq = i + 1; store.apply(state, ev); });
+    api.cacheState(store.serialize(state));
+  } catch {
+    const cached = api.loadCache();
+    if (cached) state = store.deserialize(cached);
+    allEvents = [];
+  }
+  renderAll();
+}
+
+function authError(el, msg) {
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+/* ---------- rendering ---------- */
+function applySettings() {
+  document.documentElement.style.setProperty('--accent', state.settings.accent || DEFAULT_ACCENT);
+  $('boardTag').textContent = state.settings.boardName || 'daily habit tracker';
+}
+
+function renderTabs() {
+  const wrap = $('tabs');
+  let html = `<div class="month-tab dashboard${view.kind === 'year' ? ' active' : ''}" data-tab="dash">YEAR DASHBOARD</div>`;
+  MONTHS_SHORT.forEach((mn, i) => {
+    const active = view.kind === 'month' && view.m === i + 1;
+    html += `<div class="month-tab${active ? ' active' : ''}" data-tab="${i + 1}">${mn}</div>`;
+  });
+  wrap.innerHTML = html;
+}
+
+function renderAll() {
+  applySettings();
+  $('yearLabel').textContent = view.y;
+  $('viewLabel').textContent = view.kind === 'month'
+    ? `${MONTHS[view.m - 1].toUpperCase()} ${view.y}` : `${view.y} DASHBOARD`;
+  renderTabs();
+
+  const dot = $('syncDot');
+  dot.className = 'sync-dot ' + (api.online ? 'ok' : 'off');
+  dot.title = api.online ? 'Synced to GitHub' : `Offline — ${api.queueSize()} change(s) queued, will sync when back online`;
+
+  const monthView = $('monthView'), dashView = $('dashView'), empty = $('emptyState');
+
+  if (state.habits.size === 0) {
+    monthView.style.display = 'none';
+    dashView.style.display = 'none';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  if (view.kind === 'year') {
+    monthView.style.display = 'none';
+    dashView.style.display = '';
+    renderDashboard(dashView, state, view.y);
+    return;
+  }
+
+  monthView.style.display = '';
+  dashView.style.display = 'none';
+  const tl = monthTimeline(view.y, view.m);
+  renderArea($('areaChart'), state, view.y, view.m);
+  renderGauge($('gauge'), $('gaugeNum'), $('gaugeSub'), state, view.y, view.m);
+  renderRoutines($('routinesTable'), state, view.y, view.m, tl);
+  renderAnalysis($('analysisTable'), state, view.y, view.m, tl);
+  renderLeaderboard($('leaderboard'), state, view.y, view.m);
+  renderStreaks($('streaks'), state);
+}
+
+/* ---------- habit modal flows ---------- */
+function openNewHabit() {
+  openHabitModal({
+    onSave: f => {
+      mutate([store.makeEvent('habit.create', {
+        id: store.newHabitId(), name: f.name, emoji: f.emoji,
+        targetPerWeek: f.targetPerWeek, order: state.habits.size,
+        createdOn: todayYmd(),
+      })]);
+    },
+  });
+}
+
+function openEditHabit(id) {
+  const h = state.habits.get(id);
+  if (!h) return;
+  const checkCount = [...state.checks.values()].filter(s => s.has(id)).length;
+  openHabitModal({
+    habit: h, checkCount,
+    onSave: f => {
+      const changes = {};
+      if (f.name !== h.name) changes.name = [h.name, f.name];
+      if (f.emoji !== h.emoji) changes.emoji = [h.emoji, f.emoji];
+      if (f.targetPerWeek !== h.targetPerWeek) changes.targetPerWeek = [h.targetPerWeek, f.targetPerWeek];
+      if (Object.keys(changes).length) mutate([store.makeEvent('habit.update', { id, changes })]);
+    },
+    onMove: dir => {
+      const order = [...state.habits.values()].sort((a, b) => a.order - b.order).map(x => x.id);
+      const i = order.indexOf(id), j = i + dir;
+      if (j < 0 || j >= order.length) return;
+      [order[i], order[j]] = [order[j], order[i]];
+      mutate([store.makeEvent('habit.reorder', { order })]);
+    },
+    onArchive: () => {
+      mutate([store.makeEvent('habit.archive', { id, on: todayYmd() })]);
+      showToast(`Archived "${h.name}"`, () => mutate([store.makeEvent('habit.restore', { id })]));
+    },
+    onRestore: () => mutate([store.makeEvent('habit.restore', { id })]),
+    onDelete: () => {
+      const snapshot = { ...h };
+      mutate([store.makeEvent('habit.delete', { id, snapshot, checkCount })]);
+      showToast(`Deleted "${h.name}"`, () =>
+        mutate([store.makeEvent('habit.create', { ...snapshot })]));   // same id → history resurfaces
+    },
+  });
+}
+
+/* ---------- settings ---------- */
+function openSettings() {
+  openSettingsModal({
+    settings: { boardName: state.settings.boardName || '', accent: state.settings.accent || DEFAULT_ACCENT },
+    accents: ACCENTS,
+    onSave: f => {
+      const changes = {};
+      if (f.boardName !== (state.settings.boardName || '')) changes.boardName = [state.settings.boardName || '', f.boardName];
+      if (f.accent !== (state.settings.accent || DEFAULT_ACCENT)) changes.accent = [state.settings.accent || DEFAULT_ACCENT, f.accent];
+      if (Object.keys(changes).length) mutate([store.makeEvent('settings.update', { changes })]);
+    },
+    onChangePass: async (oldPass, newPass) => {
+      await auth.changePassphrase(oldPass, newPass);   // throws user-readable errors
+      showToast('Passphrase changed. Other devices will need to be reset and set up again.');
+    },
+    onExport: () => {
+      const payload = {
+        format: 'monolith-plain-export/1',
+        exportedAt: new Date().toISOString(),
+        eventCount: allEvents.length,
+        events: allEvents,
+        state: store.serialize(state),
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `monolith-backup-${todayYmd()}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    },
+    onLogout: () => {
+      auth.logout();
+      api.clearLocal();               // plaintext cache + queue leave with the session
+      api.deinit();
+      state = store.emptyState();
+      allEvents = [];
+      showAuth();
+    },
+    onResetDevice: () => {
+      auth.resetDevice();
+      api.clearLocal();
+      api.deinit();
+      state = store.emptyState();
+      allEvents = [];
+      showAuth();
+    },
+  });
+}
+
+/* ---------- event wiring ---------- */
+function wire() {
+  /* auth */
+  $('lockForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('lockErr').style.display = 'none';
+    const btn = $('lockBtn');
+    btn.disabled = true; btn.textContent = 'Unlocking…';
+    try {
+      const session = await auth.unlock($('lockPass').value);
+      await startApp(session);
+    } catch (err) {
+      authError($('lockErr'), err.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Unlock';
+    }
+  });
+  $('lockReset').addEventListener('click', () => {
+    if ($('lockReset').dataset.armed) {
+      auth.resetDevice(); api.clearLocal(); showAuth();
+      delete $('lockReset').dataset.armed;
+      $('lockReset').textContent = 'Reset this device…';
+    } else {
+      $('lockReset').dataset.armed = '1';
+      $('lockReset').textContent = 'Really reset? Wipes this device’s vault (your data on GitHub is untouched)';
+    }
+  });
+
+  $('setupForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('setupErr').style.display = 'none';
+    const pass = $('setupPass').value, pass2 = $('setupPass2').value;
+    const repoFull = $('setupRepo').value.trim();
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repoFull)) return authError($('setupErr'), 'Repo must look like owner/name, e.g. HenryBrockman17/monolith-data');
+    if (pass.length < 10) return authError($('setupErr'), 'Passphrase must be at least 10 characters. A few random words works well.');
+    if (pass !== pass2) return authError($('setupErr'), 'Passphrases don’t match.');
+    const [owner, repo] = repoFull.split('/');
+    const btn = $('setupBtn');
+    btn.disabled = true; btn.textContent = 'Setting up…';
+    try {
+      const session = await auth.setup({ pat: $('setupToken').value.trim(), owner, repo, passphrase: pass });
+      await startApp(session);
+    } catch (err) {
+      authError($('setupErr'), err.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Set up & unlock';
+    }
+  });
+
+  /* app chrome */
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('tabs').addEventListener('click', e => {
+    const tab = e.target.closest('[data-tab]');
+    if (!tab) return;
+    view = tab.dataset.tab === 'dash'
+      ? { kind: 'year', y: view.y }
+      : { kind: 'month', y: view.y, m: Number(tab.dataset.tab) };
+    renderAll();
+  });
+  $('yearPrev').addEventListener('click', () => { view.y--; renderAll(); });
+  $('yearNext').addEventListener('click', () => { view.y++; renderAll(); });
+
+  /* month view */
+  $('monthView').addEventListener('click', e => {
+    const cell = e.target.closest('.cb-cell[data-habit]');
+    if (cell) {
+      if (cell.dataset.future) return;
+      const { habit, date } = cell.dataset;
+      const value = !S.isChecked(state, habit, date);
+      mutate([store.makeEvent('check.set', { habit, date, value, ctx: checkCtx(date) })]);
+      return;
+    }
+    const edit = e.target.closest('[data-edit]');
+    if (edit) { openEditHabit(edit.dataset.edit); return; }
+    if (e.target.closest('#addRoutine')) openNewHabit();
+  });
+
+  $('monthView').addEventListener('mousemove', e => {
+    const bar = e.target.closest('[data-abar]');
+    if (bar) {
+      const tl = monthTimeline(view.y, view.m);
+      showTip(analysisTipHtml(state, view.y, view.m, bar.dataset.abar, tl), e.clientX, e.clientY);
+      return;
+    }
+    const zone = e.target.closest('[data-adate]');
+    if (zone) {
+      const date = zone.dataset.adate;
+      const habits = S.visibleHabits(state, view.y, view.m);
+      const done = S.dayDone(state, habits, date);
+      const goal = S.dayGoal(habits, date);
+      const d = parseYmd(date);
+      showTip(`<b>${d.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric' })}</b>` +
+        `<div class="t-sub">${done} of ${goal} habits · ${goal ? Math.round(done / goal * 100) : 0}%</div>`, e.clientX, e.clientY);
+      return;
+    }
+    hideTip();
+  });
+  $('monthView').addEventListener('mouseleave', hideTip);
+
+  $('dashView').addEventListener('click', e => {
+    const col = e.target.closest('[data-goto-month]');
+    if (col) { view = { kind: 'month', y: view.y, m: Number(col.dataset.gotoMonth) }; renderAll(); }
+  });
+
+  $('addFirst').addEventListener('click', openNewHabit);
+  $('loadExample').addEventListener('click', () => {
+    const t = todayYmd();
+    mutate(EXAMPLE_SET.map(([name, emoji, target], i) =>
+      store.makeEvent('habit.create', {
+        id: store.newHabitId(), name, emoji, targetPerWeek: target, order: i, createdOn: t,
+      })));
+  });
+
+  api.statusListener(() => renderAll());
+  window.addEventListener('online', () => api.flushQueue());
+  setInterval(() => { if (!api.online) api.flushQueue(); }, 15000);
+  /* enforce session expiry while the tab stays open */
+  setInterval(async () => {
+    if ($('appMain').style.display !== 'none' && !(await auth.getSession())) {
+      api.deinit(); state = store.emptyState(); allEvents = []; showAuth();
+    }
+  }, 60000);
+}
+
+/* ---------- boot ---------- */
+async function boot() {
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+  wire();
+  const session = await auth.getSession();
+  if (session) await startApp(session);
+  else showAuth();
+}
+
+boot();
