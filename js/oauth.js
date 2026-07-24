@@ -3,8 +3,8 @@
    The client secret never exists here — only in the worker. */
 
 export const OAUTH = {
-  clientId: 'REPLACE_CLIENT_ID',
-  workerBase: 'https://REPLACE.workers.dev',
+  clientId: 'Iv23lifjBpBeU9r9ucT1',
+  workerBase: 'https://monolith-auth.henrybrockman17.workers.dev',
 };
 export function configure(cfg) { Object.assign(OAUTH, cfg); }   // tests / future config
 
